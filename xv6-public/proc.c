@@ -88,6 +88,7 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  p->nice = 20;
 
   release(&ptable.lock);
 
@@ -199,6 +200,7 @@ fork(void)
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
+  np->nice = curproc->nice;
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
@@ -322,19 +324,27 @@ wait(void)
 void
 scheduler(void)
 {
-  struct proc *p;
+  struct proc *p, *p1;
   struct cpu *c = mycpu();
   c->proc = 0;
   
   for(;;){
     // Enable interrupts on this processor.
     sti();
+    struct proc *highest_priority ; //highest priority
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
+      if(p->state != RUNNABLE) continue;
+      highest_priority = p;
+    
+	    for(p1 = ptable.proc; p1 < &ptable.proc[NPROC]; p1++){
+	      if(p1->state != RUNNABLE) continue;
+        if(highest_priority->nice > p1->nice)
+        highest_priority = p1;
+      }
+      p = highest_priority;
 
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
@@ -531,4 +541,46 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+
+int
+getnice(int pid)
+{
+	if (pid <= 0) return -1;
+
+  struct proc *p;
+
+  acquire(&ptable.lock);
+
+  for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if (p->pid == pid) {
+      release(&ptable.lock);
+      return p->nice;
+    }
+  }
+
+  release(&ptable.lock);
+  return -1;
+}
+
+int
+setnice(int pid, int value)
+{
+	if (value < 0 || value > 40 || pid <= 0) return -1;
+
+  struct proc *p;
+
+  acquire(&ptable.lock);
+
+  for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if (p->pid == pid) {
+      p->nice = value;
+      release(&ptable.lock);
+      yield();
+      return 0;
+    }
+  }
+
+  release(&ptable.lock);
+  return -1;
 }
